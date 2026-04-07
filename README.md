@@ -7,7 +7,7 @@ trading and allocation. Built for the OpenEnv Hackathon.
 
 ## 🚀 Live Demo
 
-👉 [HuggingFace Space](https://huggingface.co/spaces/YOUR_USERNAME/carbonenv)
+👉 https://huggingface.co/spaces/Anmol318/carbonenv
 
 ---
 
