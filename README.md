@@ -1,3 +1,14 @@
+---
+title: Carbonenv
+emoji: 🚀
+colorFrom: indigo
+colorTo: red
+sdk: docker
+pinned: false
+---
+
+Check out the configuration reference at https://huggingface.co/docs/hub/spaces-config-reference
+
 🌿 CarbonEnv — Carbon-Aware RL Environment
 
 An OpenEnv-compatible reinforcement learning environment for carbon-aware job scheduling and carbon credit optimization.
