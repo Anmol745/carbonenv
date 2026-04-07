@@ -1,0 +1,97 @@
+name: carbon-credit-env
+version: "1.0.0"
+description: >
+  Carbon-aware job scheduling simulation for data centers.
+  Agents must schedule compute jobs while managing carbon budgets,
+  minimizing emissions, and trading carbon credits profitably.
+  Models a real operational challenge faced by hyperscale data centers.
+
+author: "carbon-credit-env"
+license: MIT
+tags:
+  - openenv
+  - scheduling
+  - climate
+  - carbon
+  - reinforcement-learning
+  - data-center
+
+environment:
+  entry_point: "env.carbon_env:CarbonEnv"
+  observation_model: "env.models:Observation"
+  action_model: "env.models:Action"
+  reward_model: "env.models:Reward"
+
+  observation_space:
+    jobs_remaining:       { type: int,   description: "Unscheduled jobs remaining" }
+    jobs_completed:       { type: int,   description: "Jobs finished this episode" }
+    carbon_budget:        { type: float, description: "Total CO2 budget (kg)" }
+    carbon_used:          { type: float, description: "CO2 emitted so far (kg)" }
+    energy_price:         { type: float, description: "Grid energy price $/MWh" }
+    renewable_ratio:      { type: float, range: [0.0, 1.0], description: "Grid renewable fraction" }
+    carbon_credit_price:  { type: float, description: "Carbon credit spot price $/credit" }
+    server_load:          { type: float, range: [0.0, 1.0], description: "Server utilization" }
+    credits_held:         { type: float, description: "Credits in agent's portfolio" }
+    timestep:             { type: int,   description: "Current episode step" }
+    max_timesteps:        { type: int,   description: "Episode length" }
+    task_id:              { type: int,   description: "Active task (1/2/3)" }
+
+  action_space:
+    action_type:
+      type: str
+      choices: [allocate_jobs, delay_jobs, buy_carbon_credits, sell_carbon_credits, idle]
+    amount:
+      type: float
+      range: [0.0, 10.0]
+      description: "Magnitude of the action"
+
+tasks:
+  - id: 1
+    name: "Green Window Scheduling"
+    difficulty: easy
+    description: >
+      Schedule 12 jobs in 24 steps. Maximize proportion of jobs
+      allocated during high-renewable windows (renewable_ratio > 0.7).
+    grader: "tasks.task1:grade"
+    max_timesteps: 24
+    total_jobs: 12
+    carbon_budget: 200.0
+
+  - id: 2
+    name: "Budget-Constrained Execution"
+    difficulty: medium
+    description: >
+      Complete 30 jobs in 48 steps without exceeding 150 kg CO2.
+      Budget overrun caps score at 0.3.
+    grader: "tasks.task2:grade"
+    max_timesteps: 48
+    total_jobs: 30
+    carbon_budget: 150.0
+
+  - id: 3
+    name: "Profit-Aware Carbon Trading"
+    difficulty: hard
+    description: >
+      Complete 50 jobs in 72 steps, stay under 120 kg CO2, AND generate
+      net positive profit from carbon credit trading. All three objectives
+      must be balanced simultaneously.
+    grader: "tasks.task3:grade"
+    max_timesteps: 72
+    total_jobs: 50
+    carbon_budget: 120.0
+
+inference:
+  script: "inference.py"
+  client: openai
+  env_vars:
+    API_BASE_URL: "LLM API endpoint"
+    MODEL_NAME:   "Model identifier"
+    HF_TOKEN:     "Hugging Face / API key"
+
+baseline:
+  seed: 42
+  model: "meta-llama/Llama-3.1-8B-Instruct"
+  expected_scores:
+    task_1: ~0.55
+    task_2: ~0.40
+    task_3: ~0.35

@@ -1,0 +1,28 @@
+# Python caches and compiled files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.env/
+.env.*  # any environment files
+
+# Jupyter Notebook checkpoints (if any)
+.ipynb_checkpoints
+
+# Docker files (if you want to ignore builds)
+*.log
+*.tmp
+*.swp
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Hugging Face token / secrets
+hf_*
+
+# Any data folder you don’t want to push
+data/
