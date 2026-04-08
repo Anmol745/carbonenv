@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "carbon-credit-env"
+version = "1.0.0"
+description = "Carbon-aware job scheduling RL environment for OpenEnv Hackathon"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [
+    { name = "Anmol", email = "anmol@example.com" }
+]
+keywords = ["reinforcement-learning", "carbon", "openenv", "scheduling"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "flask>=3.0.0",
+    "pydantic>=2.0.0",
+    "openai>=1.0.0",
+    "numpy>=1.24.0",
+    "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "black", "ruff"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["env*", "tasks*", "graders*", "agents*"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
