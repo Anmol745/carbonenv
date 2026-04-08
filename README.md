@@ -62,11 +62,17 @@ GET	/state	Get current environment state
 POST	/grade	Grade current episode
 GET	/tasks	List all tasks
 GET	/	Dashboard UI
-⚙️ Setup & Run Locally
-1️⃣ Install Dependencies
-pip install -r requirements.txt
-2️⃣ Set Environment Variables
 
+⚙️ Setup & Run Locally
+
+1️⃣Clone the repository
+git clone https://github.com/Anmol745/carbonenv.git
+cd carbonenv
+
+2️⃣Install Dependencies
+pip install -r requirements.txt
+
+3️⃣Set Environment Variables
 PowerShell (Windows):
 
 $env:HF_TOKEN="your_token_here"
@@ -78,13 +84,13 @@ Linux / Mac:
 export HF_TOKEN="your_token_here"
 export API_BASE_URL="https://api-inference.huggingface.co/v1/"
 export MODEL_NAME="meta-llama/Llama-3.1-8B-Instruct"
-3️⃣ Start the Environment Server
+4️⃣Start the Environment Server
 python app.py
 
 Server runs at:
 
 http://localhost:7860
-4️⃣ Run the LLM Agent
+5️⃣Run the LLM Agent
 python inference.py
 
 The script will:
