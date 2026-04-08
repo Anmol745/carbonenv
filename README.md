@@ -84,13 +84,17 @@ Linux / Mac:
 export HF_TOKEN="your_token_here"
 export API_BASE_URL="https://api-inference.huggingface.co/v1/"
 export MODEL_NAME="meta-llama/Llama-3.1-8B-Instruct"
+
 4️⃣Start the Environment Server
+
 python app.py
 
 Server runs at:
 
 http://localhost:7860
+
 5️⃣Run the LLM Agent
+
 python inference.py
 
 The script will:
@@ -126,6 +130,7 @@ carbonenv
 Then open:
 
 http://localhost:7860
+
 📊 Reward System
 
 The environment evaluates actions based on:
@@ -138,6 +143,7 @@ total system performance
 Rewards accumulate during the episode.
 
 reward = efficiency + renewable_bonus - carbon_penalty
+
 📈 Grading
 
 After the episode finishes:
@@ -162,6 +168,7 @@ MODEL_NAME	Model used for inference
 HF_TOKEN	HuggingFace API token
 ENV_URL	Environment server URL
 PORT	Server port (default 7860)
+
 🖥️ Dashboard
 
 The environment includes a live web dashboard.
@@ -199,6 +206,6 @@ MIT License
 
 👨‍💻 Author
 
-Anmol
+Anmol,Dhruv,Prince
 
 Built for the OpenEnv Hackathon
