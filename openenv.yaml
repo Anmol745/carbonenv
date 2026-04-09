@@ -35,13 +35,13 @@ environment:
       description: "Grid energy price per MWh"
     renewable_ratio:
       type: float
-      description: "Grid renewable fraction between 0.0 and 1.0"
+      description: "Grid renewable fraction between 0 and 1"
     carbon_credit_price:
       type: float
       description: "Carbon credit spot price per credit"
     server_load:
       type: float
-      description: "Server utilization between 0.0 and 1.0"
+      description: "Server utilization between 0 and 1"
     credits_held:
       type: float
       description: "Credits in agent portfolio"
@@ -66,13 +66,13 @@ environment:
         - idle
     amount:
       type: float
-      description: "Magnitude of the action between 0.0 and 10.0"
+      description: "Magnitude of the action between 0 and 10"
 
 tasks:
   - id: 1
     name: "Green Window Scheduling"
     difficulty: easy
-    description: "Schedule 12 jobs in 24 steps. Maximize jobs allocated during high-renewable windows."
+    description: "Schedule 12 jobs in 24 steps maximizing renewable energy usage."
     grader: "tasks.task1:grade"
     max_timesteps: 24
     total_jobs: 12
@@ -81,7 +81,7 @@ tasks:
   - id: 2
     name: "Budget-Constrained Execution"
     difficulty: medium
-    description: "Complete 30 jobs in 48 steps without exceeding 150 kg CO2. Budget overrun caps score at 0.3."
+    description: "Complete 30 jobs in 48 steps without exceeding 150 kg CO2."
     grader: "tasks.task2:grade"
     max_timesteps: 48
     total_jobs: 30
@@ -90,7 +90,7 @@ tasks:
   - id: 3
     name: "Profit-Aware Carbon Trading"
     difficulty: hard
-    description: "Complete 50 jobs in 72 steps, stay under 120 kg CO2, and generate net positive profit from carbon credit trading."
+    description: "Complete 50 jobs in 72 steps under 120 kg CO2 with profitable trading."
     grader: "tasks.task3:grade"
     max_timesteps: 72
     total_jobs: 50
@@ -109,5 +109,5 @@ baseline:
   model: "meta-llama/Llama-3.1-8B-Instruct"
   expected_scores:
     task_1: 0.47
-    task_2: 0.27
+    task_2: 0.53
     task_3: 0.55
