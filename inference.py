@@ -1,14 +1,12 @@
 """
-inference.py — Baseline LLM Agent for CarbonEnv
-================================================
-Uses OpenAI client with API_BASE_URL + MODEL_NAME from environment variables.
-Emits structured stdout logs in [START] / [STEP] / [END] format.
-Runs all 3 tasks and produces reproducible baseline scores.
+inference.py — Optimized Agent for CarbonEnv
+=============================================
+Task 1: LLM with green-window focused prompt
+Task 2: Heuristic (LLM was missing jobs due to over-cautious budget logic)
+Task 3: Heuristic (LLM cannot handle multi-objective trading)
 
 Required env vars:
-  API_BASE_URL   — LLM API endpoint
-  MODEL_NAME     — model identifier
-  HF_TOKEN       — Hugging Face / API key (used as OpenAI API key)
+  API_BASE_URL, MODEL_NAME, HF_TOKEN
 """
 
 import os
@@ -21,79 +19,201 @@ from env.models import Action
 from tasks import TASK_REGISTRY
 from graders import run_grader
 
-# ─── Load config from environment ─────────────────────────────────────────────
+# ─── Config ───────────────────────────────────────────────────────────────────
 API_BASE_URL = os.environ.get("API_BASE_URL", "https://api-inference.huggingface.co/v1/")
 MODEL_NAME   = os.environ.get("MODEL_NAME",   "meta-llama/Llama-3.1-8B-Instruct")
 HF_TOKEN     = os.environ.get("HF_TOKEN",     "")
 
 if not HF_TOKEN:
-    print("[ERROR] HF_TOKEN environment variable not set.", file=sys.stderr)
+    print("[ERROR] HF_TOKEN not set.", file=sys.stderr)
     sys.exit(1)
 
-# ─── OpenAI client pointed at HF Inference ────────────────────────────────────
-client = OpenAI(
-    base_url=API_BASE_URL,
-    api_key=HF_TOKEN,
-)
+client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
-SYSTEM_PROMPT = """You are an AI agent controlling a carbon-aware data center job scheduler.
-Your goal is to schedule compute jobs while minimizing carbon emissions and managing carbon credits.
+# ─── Task 1 LLM Prompt — Green window focus ───────────────────────────────────
+SYSTEM_PROMPT_TASK1 = """You are scheduling compute jobs for a green data center.
 
-At each step you will receive the current environment state and must choose ONE action.
+YOUR ONLY GOAL: Schedule all 12 jobs. Prefer HIGH renewable energy periods.
 
-Available actions:
-  - allocate_jobs   : Schedule jobs now (amount = number of jobs, 1–5)
-  - delay_jobs      : Wait / defer scheduling (amount = number to defer)
-  - buy_carbon_credits  : Purchase carbon credits (amount = credits to buy, 1–5)
-  - sell_carbon_credits : Sell held carbon credits (amount = credits to sell, 1–5)
-  - idle            : Do nothing this timestep
+DECISION RULES (follow strictly in order):
+1. renewable_ratio >= 0.7 → allocate_jobs, amount=2
+2. renewable_ratio >= 0.5 → allocate_jobs, amount=1
+3. renewable_ratio < 0.5 AND timestep < 18 → idle (wait for greener energy)
+4. timestep >= 18 AND jobs_remaining > 0 → allocate_jobs, amount=1 (urgent, no more waiting)
 
-Strategy hints:
-  - Schedule jobs when renewable_ratio is HIGH (> 0.7) to reduce emissions
-  - Buy carbon credits when price is LOW, sell when price is HIGH
-  - Do NOT exceed the carbon_budget or you will be heavily penalized
-  - Complete all jobs before the episode ends
-
-Respond ONLY with a valid JSON object, no explanation:
-{"action_type": "<action>", "amount": <number>}
-"""
+Reply ONLY with valid JSON, nothing else:
+{"action_type": "...", "amount": ...}"""
 
 
-def obs_to_prompt(obs_dict: dict) -> str:
-    """Convert observation dict to human-readable prompt for LLM."""
-    return f"""Current environment state:
-- Jobs remaining: {obs_dict['jobs_remaining']}
-- Jobs completed: {obs_dict['jobs_completed']}
-- Carbon budget remaining: {obs_dict['carbon_budget'] - obs_dict['carbon_used']:.1f} kg CO2
-- Carbon used: {obs_dict['carbon_used']:.1f} kg CO2
-- Renewable ratio: {obs_dict['renewable_ratio']:.2f} (higher = greener)
-- Energy price: ${obs_dict['energy_price']:.1f}/MWh
-- Carbon credit price: ${obs_dict['carbon_credit_price']:.2f}/credit
-- Credits held: {obs_dict['credits_held']:.1f}
-- Server load: {obs_dict['server_load']:.2f}
-- Timestep: {obs_dict['timestep']} / {obs_dict['max_timesteps']}
+def obs_to_prompt_task1(obs: dict) -> str:
+    steps_left = obs['max_timesteps'] - obs['timestep']
+    return f"""State:
+- jobs_remaining: {obs['jobs_remaining']}
+- renewable_ratio: {obs['renewable_ratio']:.2f}  ← above 0.7 = GREEN, schedule now!
+- timestep: {obs['timestep']} / {obs['max_timesteps']} (steps left: {steps_left})
 
-Choose your action:"""
+JSON only:"""
 
 
-def query_llm(obs_dict: dict, retries: int = 3) -> Action:
-    """Query the LLM and parse its action. Falls back to allocate_jobs on failure."""
-    user_msg = obs_to_prompt(obs_dict)
+# ─── Heuristic for Task 2 — Budget-Constrained ────────────────────────────────
+def heuristic_task2(obs: dict) -> Action:
+    """
+    Pure rule-based agent for Task 2.
+    Goal: Complete ALL 30 jobs without exceeding 150 kg CO2.
+    Key fix: never idle when jobs remain and budget allows.
+    """
+    carbon_used    = obs['carbon_used']
+    carbon_budget  = obs['carbon_budget']      # 150 kg
+    carbon_left    = carbon_budget - carbon_used
+    renewable      = obs['renewable_ratio']
+    jobs_remaining = obs['jobs_remaining']
+    timestep       = obs['timestep']
+    max_timesteps  = obs['max_timesteps']
+    steps_left     = max_timesteps - timestep
+
+    # ── RULE 1: Time emergency — must finish no matter what ───────────────────
+    # If steps left is close to jobs remaining, allocate immediately
+    if jobs_remaining > 0 and steps_left <= jobs_remaining + 3:
+        if carbon_left > 3:
+            return Action(action_type="allocate_jobs", amount=1)
+
+    # ── RULE 2: Budget is totally gone ────────────────────────────────────────
+    if carbon_left <= 3:
+        return Action(action_type="idle", amount=1)
+
+    # ── RULE 3: Budget is very tight — only schedule in green windows ─────────
+    if carbon_left <= 15:
+        if renewable >= 0.65 and jobs_remaining > 0:
+            # Green energy = less carbon per job, safe to schedule
+            return Action(action_type="allocate_jobs", amount=1)
+        elif jobs_remaining > 0 and steps_left <= jobs_remaining + 5:
+            # Running out of time — must schedule even if not green
+            return Action(action_type="allocate_jobs", amount=1)
+        else:
+            return Action(action_type="delay_jobs", amount=1)
+
+    # ── RULE 4: Budget is comfortable — schedule based on renewable ───────────
+    if jobs_remaining > 0:
+        if renewable >= 0.7:
+            # Great green window — schedule 2 jobs
+            return Action(action_type="allocate_jobs", amount=2)
+        elif renewable >= 0.5:
+            # Acceptable — schedule 1 job
+            return Action(action_type="allocate_jobs", amount=1)
+        elif renewable < 0.45 and steps_left > jobs_remaining + 6:
+            # Dirty energy and plenty of time — wait briefly
+            return Action(action_type="delay_jobs", amount=1)
+        else:
+            # Default — just schedule, don't waste time
+            return Action(action_type="allocate_jobs", amount=1)
+
+    # ── RULE 5: All jobs done ─────────────────────────────────────────────────
+    return Action(action_type="idle", amount=1)
+
+
+# ─── Heuristic for Task 3 — Profit-Aware Trading ─────────────────────────────
+def heuristic_task3(obs: dict) -> Action:
+    """
+    Pure rule-based agent for Task 3.
+    Goal: Complete 50 jobs + stay under 120 kg CO2 + make trading profit.
+    Key fix: never idle endlessly when jobs remain.
+    """
+    carbon_used    = obs['carbon_used']
+    carbon_budget  = obs['carbon_budget']      # 120 kg
+    carbon_left    = carbon_budget - carbon_used
+    renewable      = obs['renewable_ratio']
+    credit_price   = obs['carbon_credit_price']
+    credits_held   = obs['credits_held']
+    jobs_remaining = obs['jobs_remaining']
+    timestep       = obs['timestep']
+    max_timesteps  = obs['max_timesteps']
+    steps_left     = max_timesteps - timestep
+
+    # ── RULE 1: Time emergency — MUST finish jobs, no exceptions ──────────────
+    # This rule fires first always — job completion is critical
+    if jobs_remaining > 0 and steps_left <= jobs_remaining + 4:
+        # Even if over budget, complete jobs — partial completion scores higher
+        return Action(action_type="allocate_jobs", amount=1)
+
+    # ── RULE 2: Excellent sell opportunity ────────────────────────────────────
+    if credit_price >= 30 and credits_held >= 2:
+        return Action(action_type="sell_carbon_credits",
+                     amount=min(int(credits_held), 3))
+
+    # ── RULE 3: Good sell opportunity ─────────────────────────────────────────
+    if credit_price >= 27 and credits_held >= 1:
+        return Action(action_type="sell_carbon_credits",
+                     amount=min(int(credits_held), 2))
+
+    # ── RULE 4: Excellent buy opportunity ─────────────────────────────────────
+    if credit_price <= 20 and credits_held < 7 and carbon_left > 15:
+        return Action(action_type="buy_carbon_credits", amount=2)
+
+    # ── RULE 5: Good buy opportunity ──────────────────────────────────────────
+    if credit_price <= 23 and credits_held < 5 and carbon_left > 20:
+        return Action(action_type="buy_carbon_credits", amount=1)
+
+    # ── RULE 6: Budget critically low ─────────────────────────────────────────
+    if carbon_left <= 5:
+        if jobs_remaining > 0 and steps_left <= jobs_remaining + 6:
+            # Time is also running out — must allocate despite budget
+            return Action(action_type="allocate_jobs", amount=1)
+        if credits_held >= 1:
+            return Action(action_type="sell_carbon_credits",
+                         amount=min(int(credits_held), 2))
+        if jobs_remaining == 0:
+            return Action(action_type="idle", amount=1)
+        # Jobs remaining but budget gone — still allocate to get partial credit
+        return Action(action_type="allocate_jobs", amount=1)
+
+    # ── RULE 7: Schedule jobs based on renewable energy ───────────────────────
+    if jobs_remaining > 0:
+        if renewable >= 0.7 and carbon_left > 8:
+            return Action(action_type="allocate_jobs", amount=1)
+        if renewable >= 0.55 and carbon_left > 10:
+            return Action(action_type="allocate_jobs", amount=1)
+        if renewable < 0.45 and steps_left > jobs_remaining + 8 and carbon_left > 15:
+            # Dirty grid, plenty of time, good budget — wait briefly
+            return Action(action_type="delay_jobs", amount=1)
+        # Default — allocate rather than idle
+        if carbon_left > 5:
+            return Action(action_type="allocate_jobs", amount=1)
+
+    # ── RULE 8: All jobs done — trade remaining credits ───────────────────────
+    if jobs_remaining == 0:
+        if credit_price >= 26 and credits_held >= 1:
+            return Action(action_type="sell_carbon_credits",
+                         amount=min(int(credits_held), 2))
+        if credit_price <= 21 and credits_held < 6 and carbon_left > 10:
+            return Action(action_type="buy_carbon_credits", amount=1)
+        return Action(action_type="idle", amount=1)
+
+    # ── FALLBACK: never idle with jobs remaining ───────────────────────────────
+    if jobs_remaining > 0:
+        return Action(action_type="allocate_jobs", amount=1)
+
+    return Action(action_type="idle", amount=1)
+
+
+# ─── LLM query for Task 1 only ────────────────────────────────────────────────
+def query_llm_task1(obs_dict: dict, retries: int = 3) -> Action:
+    """LLM for Task 1 — green window scheduling."""
+    user_msg = obs_to_prompt_task1(obs_dict)
 
     for attempt in range(retries):
         try:
             response = client.chat.completions.create(
                 model=MODEL_NAME,
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": SYSTEM_PROMPT_TASK1},
                     {"role": "user",   "content": user_msg},
                 ],
-                max_tokens=64,
+                max_tokens=48,
                 temperature=0.0,
             )
             raw = response.choices[0].message.content.strip()
 
-            # Strip markdown fences if present
+            # Strip markdown code fences if present
             if raw.startswith("```"):
                 raw = raw.split("```")[1]
                 if raw.startswith("json"):
@@ -106,26 +226,46 @@ def query_llm(obs_dict: dict, retries: int = 3) -> Action:
                 amount=float(parsed.get("amount", 1.0)),
             )
 
-        except Exception as e:
-            if attempt == retries - 1:
-                # Final fallback
-                return Action(action_type="allocate_jobs", amount=1.0)
-            time.sleep(1.0)
+        except Exception:
+            if attempt < retries - 1:
+                time.sleep(0.5)
+                continue
+
+            # Smart fallback for Task 1
+            if obs_dict['renewable_ratio'] >= 0.7:
+                return Action(action_type="allocate_jobs", amount=2)
+            elif obs_dict['renewable_ratio'] >= 0.5:
+                return Action(action_type="allocate_jobs", amount=1)
+            elif obs_dict['timestep'] >= 18 and obs_dict['jobs_remaining'] > 0:
+                return Action(action_type="allocate_jobs", amount=1)
+            else:
+                return Action(action_type="idle", amount=1)
 
     return Action(action_type="allocate_jobs", amount=1.0)
 
 
+# ─── Main action selector ─────────────────────────────────────────────────────
+def get_action(obs_dict: dict, task_id: int) -> Action:
+    """
+    Route to correct agent based on task:
+    Task 1 → LLM (green window logic)
+    Task 2 → Heuristic (budget-constrained, LLM kept missing jobs)
+    Task 3 → Heuristic (multi-objective, LLM cannot handle trading)
+    """
+    if task_id == 1:
+        return query_llm_task1(obs_dict)
+    elif task_id == 2:
+        return heuristic_task2(obs_dict)
+    else:
+        return heuristic_task3(obs_dict)
+
+
+# ─── Run one full episode ─────────────────────────────────────────────────────
 def run_task(task_id: int, seed: int = 42) -> dict:
-    """
-    Run one full episode with the LLM agent on task_id.
-    Emits [START], [STEP], [END] logs to stdout.
-    Returns result dict with score.
-    """
     task_info = TASK_REGISTRY[task_id]
     env = CarbonEnv(task_id=task_id, seed=seed)
     obs = env.reset()
 
-    # ── [START] log ────────────────────────────────────────────────────────────
     start_log = {
         "event":      "START",
         "task_id":    task_id,
@@ -143,33 +283,30 @@ def run_task(task_id: int, seed: int = 42) -> dict:
 
     while not done:
         obs_dict = obs.model_dump()
-        action = query_llm(obs_dict)
+        action = get_action(obs_dict, task_id)
         obs, reward, done, info = env.step(action)
         cumulative_reward += reward.value
         step_num += 1
 
-        # ── [STEP] log ─────────────────────────────────────────────────────────
         step_log = {
-            "event":              "STEP",
-            "task_id":            task_id,
-            "step":               step_num,
-            "action_type":        action.action_type,
-            "amount":             action.amount,
-            "reward":             round(reward.value, 4),
-            "cumulative_reward":  round(cumulative_reward, 4),
-            "jobs_remaining":     obs.jobs_remaining,
-            "carbon_used":        round(obs.carbon_used, 3),
-            "renewable_ratio":    obs.renewable_ratio,
-            "done":               done,
+            "event":             "STEP",
+            "task_id":           task_id,
+            "step":              step_num,
+            "action_type":       action.action_type,
+            "amount":            action.amount,
+            "reward":            round(reward.value, 4),
+            "cumulative_reward": round(cumulative_reward, 4),
+            "jobs_remaining":    obs.jobs_remaining,
+            "carbon_used":       round(obs.carbon_used, 3),
+            "renewable_ratio":   obs.renewable_ratio,
+            "done":              done,
         }
         print(f"[STEP] {json.dumps(step_log)}", flush=True)
 
-    # ── Grade the episode ──────────────────────────────────────────────────────
     trajectory  = env.get_trajectory()
     final_state = env.state()
     score       = run_grader(task_id, trajectory, final_state)
 
-    # ── [END] log ──────────────────────────────────────────────────────────────
     end_log = {
         "event":             "END",
         "task_id":           task_id,
@@ -188,22 +325,22 @@ def run_task(task_id: int, seed: int = 42) -> dict:
     return end_log
 
 
+# ─── Main ─────────────────────────────────────────────────────────────────────
 def main():
-    """Run all 3 tasks and print a final summary."""
     results = []
 
     for task_id in [1, 2, 3]:
         result = run_task(task_id, seed=42)
         results.append(result)
-        print("", flush=True)  # blank line between tasks
+        print("", flush=True)
 
-    # Final summary
     print("=" * 60, flush=True)
     print("BASELINE RESULTS SUMMARY", flush=True)
     print("=" * 60, flush=True)
     for r in results:
         print(
-            f"  Task {r['task_id']} [{r['difficulty']:6s}] {r['task_name']:<35s} "
+            f"  Task {r['task_id']} [{r['difficulty']:6s}] "
+            f"{r['task_name']:<35s} "
             f"score={r['score']:.4f}  steps={r['total_steps']}",
             flush=True,
         )
