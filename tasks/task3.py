@@ -1,94 +1,82 @@
+"""
+Task 3: Profit-Aware Carbon Trading (HARD)
+Score range: strictly (0.001, 0.999) — never exactly 0.0 or 1.0
+"""
+
 import math
 
 TASK_ID = 3
 TASK_NAME = "Profit-Aware Carbon Trading"
 TASK_DIFFICULTY = "hard"
+TASK_DESCRIPTION = (
+    "Complete all 50 jobs within 72 timesteps while staying under 120 kg CO2 "
+    "AND generating net positive profit from carbon credit trading."
+)
+
 TOTAL_JOBS = 50
 CARBON_BUDGET = 120.0
 
-def _clamp(x, lo=0.001, hi=0.999):
-    try:
-        x = float(x)
-    except:
-        return lo
-    if math.isnan(x) or math.isinf(x):
-        return lo
-    return max(lo, min(x, hi))
 
-def _sigmoid(x):
+def _sigmoid(x: float) -> float:
     try:
-        val = 1.0 / (1.0 + math.exp(-float(x)))
+        result = 1.0 / (1.0 + math.exp(-x))
+        # Sigmoid can theoretically return exactly 0 or 1 at extremes
+        # Clamp it safely
+        return min(max(result, 0.001), 0.999)
     except OverflowError:
-        val = 0.0 if x < 0 else 1.0
-    except:
-        val = 0.5
-    # Clamp sigmoid output itself
-    return _clamp(val, 0.001, 0.999)
+        return 0.001 if x < 0 else 0.999
 
-def _grade(trajectory, final_state):
+
+def grade(trajectory: list, final_state: dict) -> float:
     if not trajectory:
         return 0.001
 
-    try:
-        jobs_completed = float(final_state.get("jobs_completed", 0) or 0)
-    except:
-        jobs_completed = 0.0
+    jobs_completed = final_state.get("jobs_completed", 0)
+    carbon_used = final_state.get("carbon_used", 0.0)
 
-    try:
-        carbon_used = float(final_state.get("carbon_used", 0) or 0)
-    except:
-        carbon_used = 0.0
+    # Completion score — max 0.98 so combined never hits 1.0
+    completion_score = min(jobs_completed / TOTAL_JOBS, 0.98)
+    completion_score = max(completion_score, 0.001)
 
-    # Clamp every component BEFORE combining
-    completion_score = _clamp(jobs_completed / TOTAL_JOBS, 0.001, 0.979)
-    # max capped at 0.979 so weighted sum never reaches 1
-
+    # Budget score
     if carbon_used > CARBON_BUDGET:
-        overage = _clamp((carbon_used - CARBON_BUDGET) / CARBON_BUDGET, 0.001, 0.999)
-        budget_score = _clamp(0.08 - overage * 0.08, 0.001, 0.079)
+        overage = (carbon_used - CARBON_BUDGET) / CARBON_BUDGET
+        budget_score = max(0.001, 0.08 - overage * 0.08)
     else:
-        carbon_ratio = _clamp(carbon_used / CARBON_BUDGET, 0.001, 0.999)
-        budget_score = _clamp(1.0 - carbon_ratio, 0.001, 0.979)
-        # max: 1 - 0.001 = 0.999 → clamped to 0.979 ✅
+        # Max 0.97 so combined never hits 1.0
+        budget_score = max(0.001, min(
+            1.0 - carbon_used / CARBON_BUDGET,
+            0.97
+        ))
 
-    buy_cost = 0.0
-    sell_revenue = 0.0
+    # Trading score from trajectory
+    buy_costs = []
+    sell_revenues = []
+
     for step in trajectory:
-        if not isinstance(step, dict):
-            continue
-        action = step.get("action")
+        action = step.get("action", "")
+        amount = step.get("amount", 0.0)
         obs = step.get("obs", {})
-        if not isinstance(obs, dict):
-            obs = {}
-        try:
-            price = float(obs.get("carbon_credit_price", 25) or 25)
-        except:
-            price = 25.0
-        try:
-            amount = float(step.get("amount", 0) or 0)
-        except:
-            amount = 0.0
+        credit_price = obs.get("carbon_credit_price", 25.0)
+
         if action == "buy_carbon_credits":
-            buy_cost += amount * price
-        if action == "sell_carbon_credits":
-            sell_revenue += amount * price
+            cost = min(amount, 20.0) * credit_price
+            buy_costs.append(cost)
+        elif action == "sell_carbon_credits":
+            credits_held_before = obs.get("credits_held", 0.0)
+            actual_sold = min(amount, credits_held_before)
+            revenue = actual_sold * credit_price
+            sell_revenues.append(revenue)
 
-    net_profit = sell_revenue - buy_cost
-    trading_score = _sigmoid(net_profit / 50.0)
-    # sigmoid output already clamped to (0.001, 0.999)
+    net_trading = sum(sell_revenues) - sum(buy_costs)
+    trading_score = _sigmoid(net_trading / 50.0)
 
-    # Combine — worst case max: 0.4*0.979 + 0.3*0.979 + 0.3*0.999
-    #                         = 0.3916 + 0.2937 + 0.2997 = 0.9850 < 1 ✅
-    #           worst case min: 0.4*0.001 + 0.3*0.001 + 0.3*0.001 = 0.001 > 0 ✅
-    raw = 0.4 * completion_score + 0.3 * budget_score + 0.3 * trading_score
-    return _clamp(raw)
+    # Combined — weights ensure max is ~0.98*0.40 + 0.97*0.30 + 0.999*0.30
+    # = 0.392 + 0.291 + 0.2997 = 0.9827 → never 1.0
+    raw = (
+        0.40 * completion_score
+        + 0.30 * budget_score
+        + 0.30 * trading_score
+    )
 
-def grade(trajectory, final_state):
-    try:
-        if trajectory is None:
-            trajectory = []
-        if final_state is None:
-            final_state = {}
-        return _clamp(_grade(trajectory, final_state))
-    except:
-        return 0.001
+    return round(min(max(raw, 0.001), 0.999), 4)
