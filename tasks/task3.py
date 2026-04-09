@@ -1,6 +1,6 @@
 """
 Task 3: Profit-Aware Carbon Trading (HARD)
-Score range: strictly (0.001, 0.999)
+Score range: strictly (0.001, 0.999) — never exactly 0.0 or 1.0
 """
 
 import math
@@ -18,34 +18,38 @@ CARBON_BUDGET = 120.0
 
 
 def _sigmoid(x: float) -> float:
-    """Maps any real number to (0, 1). Centered at 0."""
     try:
-        return 1.0 / (1.0 + math.exp(-x))
+        result = 1.0 / (1.0 + math.exp(-x))
+        # Sigmoid can theoretically return exactly 0 or 1 at extremes
+        # Clamp it safely
+        return min(max(result, 0.001), 0.999)
     except OverflowError:
         return 0.001 if x < 0 else 0.999
 
 
-def grade(trajectory: list[dict], final_state: dict) -> float:
+def grade(trajectory: list, final_state: dict) -> float:
     if not trajectory:
         return 0.001
 
     jobs_completed = final_state.get("jobs_completed", 0)
     carbon_used = final_state.get("carbon_used", 0.0)
 
-    # ── Completion score ───────────────────────────────────────────────────────
-    completion_score = min(jobs_completed / TOTAL_JOBS, 1.0)
-    # Never exactly 0 — even 0 jobs gets tiny credit
+    # Completion score — max 0.98 so combined never hits 1.0
+    completion_score = min(jobs_completed / TOTAL_JOBS, 0.98)
     completion_score = max(completion_score, 0.001)
 
-    # ── Budget score ───────────────────────────────────────────────────────────
+    # Budget score
     if carbon_used > CARBON_BUDGET:
-        # Exceeded budget — graduated penalty, not hard 0
         overage = (carbon_used - CARBON_BUDGET) / CARBON_BUDGET
-        budget_score = max(0.001, 0.1 - overage * 0.1)
+        budget_score = max(0.001, 0.08 - overage * 0.08)
     else:
-        budget_score = max(0.001, 1.0 - carbon_used / CARBON_BUDGET)
+        # Max 0.97 so combined never hits 1.0
+        budget_score = max(0.001, min(
+            1.0 - carbon_used / CARBON_BUDGET,
+            0.97
+        ))
 
-    # ── Trading score ──────────────────────────────────────────────────────────
+    # Trading score from trajectory
     buy_costs = []
     sell_revenues = []
 
@@ -65,16 +69,14 @@ def grade(trajectory: list[dict], final_state: dict) -> float:
             sell_revenues.append(revenue)
 
     net_trading = sum(sell_revenues) - sum(buy_costs)
-
-    # Sigmoid maps net profit to (0,1) — never hits exactly 0 or 1
     trading_score = _sigmoid(net_trading / 50.0)
 
-    # ── Combined score ─────────────────────────────────────────────────────────
+    # Combined — weights ensure max is ~0.98*0.40 + 0.97*0.30 + 0.999*0.30
+    # = 0.392 + 0.291 + 0.2997 = 0.9827 → never 1.0
     raw = (
         0.40 * completion_score
         + 0.30 * budget_score
         + 0.30 * trading_score
     )
 
-    # Strict clamp — never exactly 0.0 or 1.0
     return round(min(max(raw, 0.001), 0.999), 4)
